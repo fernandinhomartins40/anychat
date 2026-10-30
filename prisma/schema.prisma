@@ -86,6 +86,8 @@ model Workspace {
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
   serviceKeys       ServiceKey[]
+  contacts          Contact[]
+  tags              Tag[]
 
   @@index([ownerId])
 }
@@ -160,6 +162,7 @@ model InstagramAccount {
   dmLogs      DmLog[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  contacts          Contact[]
 
   @@index([workspaceId])
 }
@@ -221,6 +224,8 @@ model Automation {
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
   reportShareEnabled Boolean @default(true)
+  // Tag names added to everyone this campaign replies to.
+  contactTags        String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -434,4 +439,55 @@ model ZernioConnection {
 model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())
+}
+
+/// A person who interacted with a connected Instagram account. Keyed by the
+/// Instagram-scoped user id, which is stable per business account.
+model Contact {
+  id                 String        @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  igsid              String
+  username           String?
+  firstSeenAt        DateTime      @default(now())
+  lastInteractionAt  DateTime      @default(now())
+  lastSource         ContactSource
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  tags             ContactTag[]
+
+  @@unique([instagramAccountId, igsid])
+  @@index([workspaceId, lastInteractionAt])
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime @default(now())
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contacts  ContactTag[]
+
+  @@unique([workspaceId, name])
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
+}
+
+enum ContactSource {
+  COMMENT
+  DM
 }

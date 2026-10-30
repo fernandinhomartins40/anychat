@@ -19,6 +19,7 @@ import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
 import { readCache, writeCache } from "@/lib/client-cache";
+import { MAX_TAGS_PER_CAMPAIGN, normalizeTagList } from "@/lib/contacts/tags";
 import {
   IMPORT_QUEUE_KEY,
   IMPORT_ACCOUNT_KEY,
@@ -50,6 +51,7 @@ interface LoadedCampaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  contactTags?: string[];
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -184,6 +186,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  const [contactTagText, setContactTagText] = useState("");
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -191,6 +194,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // of returning to the campaigns list.
   const [importQueue, setImportQueue] = useState<ImportRow[] | null>(null);
   const [importTotal, setImportTotal] = useState(0);
+
+  const contactTags = useMemo(
+    () => normalizeTagList(contactTagText.split(",")).slice(0, MAX_TAGS_PER_CAMPAIGN),
+    [contactTagText]
+  );
 
   const keywords = useMemo(
     () =>
@@ -293,6 +301,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        setContactTagText((c.contactTags ?? []).join(", "));
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -433,6 +442,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      contactTags,
       isActive: activeValue,
     };
 
@@ -990,6 +1000,20 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 </p>
               </div>
             )}
+          </div>
+        </Section>
+
+        <Section title={t("Tag everyone who gets it as")}>
+          <div className="space-y-1">
+            <input
+              value={contactTagText}
+              onChange={(e) => setContactTagText(e.target.value)}
+              placeholder={t("e.g. lead, ebook")}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            />
+            <p className="text-xs text-muted">
+              {t("Optional. Use commas to separate tags. Find tagged people under Contacts.")}
+            </p>
           </div>
         </Section>
       </div>

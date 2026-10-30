@@ -9,6 +9,7 @@ import {
   normalizeTopKeywords,
 } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
+import { MAX_TAG_LENGTH, MAX_TAGS_PER_CAMPAIGN, normalizeTagList } from "@/lib/contacts/tags";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import {
   buildInitialCampaignLinks,
@@ -69,6 +70,7 @@ const createAutomationSchema = z
     secondaryButtonLabel: z.string().max(20).optional().nullable(),
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
+    contactTags: z.array(z.string().max(MAX_TAG_LENGTH)).max(MAX_TAGS_PER_CAMPAIGN).optional().default([]),
   })
   // A campaign must target a specific post, any post, or the next reel.
   .refine(
@@ -116,6 +118,7 @@ const updateAutomationSchema = z.object({
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
   isActive: z.boolean().optional(),
   wholeWordMatch: z.boolean().optional(),
+  contactTags: z.array(z.string().max(MAX_TAG_LENGTH)).max(MAX_TAGS_PER_CAMPAIGN).optional(),
   reportShareEnabled: z.boolean().optional(),
   // Empty string clears the tracked link; a URL updates/creates it; undefined
   // leaves it unchanged.
@@ -416,6 +419,7 @@ export async function POST(request: NextRequest) {
         : null,
       isActive: parsed.data.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
+      contactTags: normalizeTagList(parsed.data.contactTags),
       workspaceId,
       instagramAccountId: instagramAccount.id,
       reportShareSlug: generateReportShareSlug(),
@@ -540,6 +544,9 @@ export async function PATCH(request: NextRequest) {
   if (automationData.publicReplyEnabled === false) {
     automationData.publicReplyMessages = [];
     automationData.publicReplyMessage = null;
+  }
+  if (automationData.contactTags !== undefined) {
+    automationData.contactTags = normalizeTagList(automationData.contactTags);
   }
 
   // One transaction, so a save never lands half applied. Updating the campaign

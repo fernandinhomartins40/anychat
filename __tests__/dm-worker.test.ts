@@ -111,6 +111,11 @@ vi.mock("@/lib/ops/worker-health", () => ({
   recordWorkerAlert: vi.fn(),
 }));
 
+vi.mock("@/lib/contacts/record", () => ({
+  recordContactInteractionSafely: vi.fn(),
+  recordInboundDmContactSafely: vi.fn(),
+}));
+
 vi.mock("@/lib/queue/client", () => ({
   getDMQueue: () => ({
     add: mockQueueAdd,
@@ -141,6 +146,7 @@ import { MetaApiError, RateLimitError } from "@/lib/meta/client";
 import { createDMWorker } from "../lib/queue/dm-worker";
 import { getRedisConnection } from "@/lib/queue/client";
 import { hashRecipientId } from "@/lib/tracking/server";
+import { recordContactInteractionSafely, recordInboundDmContactSafely } from "@/lib/contacts/record";
 
 const usagePeriodStart = new Date("2026-05-01T00:00:00.000Z");
 
@@ -162,6 +168,7 @@ const mockAutomation = {
   publicReplyEnabled: false,
   publicReplyMessage: null,
   publicReplyMessages: [],
+  contactTags: [],
   instagramAccount: {
     id: "ig_account_row_1",
     instagramId: "ig_456",
@@ -1763,4 +1770,66 @@ it("retains the public reply claim if sending succeeded but its log write failed
   await process({ ...createMockJob(), id: "next-poll" });
   expect(sendCommentReply).toHaveBeenCalledTimes(1);
   expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+});
+
+describe("DM Worker — contacts", () => {
+  it("records the commenter as a contact with the campaign's tags", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...mockAutomation, contactTags: ["lead", "ebook"] },
+    ]);
+
+    await getProcessor()(createMockJob());
+
+    expect(recordContactInteractionSafely).toHaveBeenCalledWith({
+      workspaceId: mockAutomation.workspaceId,
+      instagramAccountId: mockAutomation.instagramAccountId,
+      igsid: "commenter_999",
+      username: "commenter_user",
+      source: "COMMENT",
+      tagNames: ["lead", "ebook"],
+    });
+  });
+
+  it("does not record a contact when no campaign matches the comment", async () => {
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+
+    await getProcessor()(createMockJob());
+
+    expect(recordContactInteractionSafely).not.toHaveBeenCalled();
+  });
+
+  it("records every inbound DM sender, even without a matching campaign", async () => {
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+
+    await getProcessor()({
+      name: "process-message",
+      data: { instagramAccountId: "ig_456", messageId: "mid_1", messageText: "oi", senderId: "sender_1" },
+      id: "message_job_contacts",
+      attemptsMade: 0,
+    });
+
+    expect(recordInboundDmContactSafely).toHaveBeenCalledWith({
+      accountConnectionId: undefined,
+      instagramUserId: "ig_456",
+      senderId: "sender_1",
+    });
+    expect(recordContactInteractionSafely).not.toHaveBeenCalled();
+  });
+
+  it("tags a DM sender when a DM-triggered campaign with tags matches", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...mockAutomation, dmTriggerEnabled: true, contactTags: ["vip"] },
+    ]);
+
+    await getProcessor()({
+      name: "process-message",
+      data: { instagramAccountId: "ig_456", messageId: "mid_2", messageText: "LINK", senderId: "sender_2" },
+      id: "message_job_contacts_2",
+      attemptsMade: 0,
+    });
+
+    expect(recordContactInteractionSafely).toHaveBeenCalledWith(
+      expect.objectContaining({ igsid: "sender_2", source: "DM", tagNames: ["vip"] })
+    );
+  });
 });

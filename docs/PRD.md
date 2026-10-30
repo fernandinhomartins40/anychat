@@ -123,7 +123,7 @@ Prioridade: **P0** = lançamento, **P1** = logo após, **P2** = depois.
 ### 6.9 SaaS
 | ID | Requisito | Prio |
 |---|---|---|
-| S1 | Marca AnyChat, português do Brasil como idioma padrão | P0 (**iniciado nesta fase**) |
+| S1 | Marca AnyChat, português do Brasil como idioma padrão; landing page nova para o SaaS | P0 (**marca e idioma feitos; landing pendente**) |
 | S2 | Planos com preço fixo e limites por conta IG / DMs por mês; cobrança (Stripe/Mercado Pago) | P0 |
 | S3 | Páginas legais (termos, privacidade, exclusão de dados) da empresa operadora | P0 |
 | S4 | Self-host continua possível (docs), com fila no Postgres para dispensar Redis | P2 |

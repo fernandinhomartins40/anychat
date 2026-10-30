@@ -46,6 +46,7 @@ import {
   reserveWorkspaceDMSend,
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
+import { recordContactInteractionSafely, recordInboundDmContactSafely } from "@/lib/contacts/record";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -441,6 +442,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         status: "PENDING",
       },
       update: {},
+    });
+
+    await recordContactInteractionSafely({
+      workspaceId: automation.workspaceId,
+      instagramAccountId: automation.instagramAccountId,
+      igsid: commenterId,
+      username: commenterName,
+      source: "COMMENT",
+      tagNames: automation.contactTags,
     });
 
     // Public reply leg — decoupled from the DM and posted first so a DM failure
@@ -1300,6 +1310,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 
   const dedupeId = `dm:${messageId}`;
 
+  // Every inbound DM makes the sender a contact, matched campaign or not.
+  await recordInboundDmContactSafely({
+    accountConnectionId: job.data.accountConnectionId,
+    instagramUserId: instagramAccountId,
+    senderId,
+  });
+
   for (const automation of automations) {
     const matchResult = automation.matchAnyWord
       ? { matched: true, matchedKeyword: null }
@@ -1328,6 +1345,16 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       existingLog?.dmDeliveryUnconfirmed
     ) {
       continue;
+    }
+
+    if (automation.contactTags.length) {
+      await recordContactInteractionSafely({
+        workspaceId: automation.workspaceId,
+        instagramAccountId: automation.instagramAccountId,
+        igsid: senderId,
+        source: "DM",
+        tagNames: automation.contactTags,
+      });
     }
 
     const logBase = {
