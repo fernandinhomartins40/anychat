@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Sidebar from "@/components/sidebar";
 import TopBar from "@/components/top-bar";
+import HealthBanner from "@/components/health-banner";
 
 interface DashboardShellProps {
   children: React.ReactNode;
@@ -41,6 +42,8 @@ export default function DashboardShell({
             whole page sideways on a phone. */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="px-4 lg:px-8 py-5 sm:py-6 max-w-7xl mx-auto">
+            {/* Active alerts: an automation must never stop silently. */}
+            <HealthBanner />
             {children}
           </div>
         </main>

@@ -1,8 +1,14 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n/provider";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import StatusBadge from "@/components/status-badge";
+import type {
+  ChecklistItem,
+  ChecklistStatus,
+  HealthIssue,
+} from "@/lib/health/issues";
 
 interface DiagnosticsData {
   queueCounts: Record<string, number>;
@@ -53,6 +59,27 @@ interface DiagnosticsData {
   }>;
 }
 
+interface HealthData {
+  issues: HealthIssue[];
+  checklist: ChecklistItem[];
+}
+
+const CHECK_ICONS: Record<ChecklistStatus, string> = {
+  ok: "✅",
+  warning: "⚠️",
+  error: "❌",
+};
+
+async function fetchHealth(): Promise<HealthData | null> {
+  try {
+    const response = await fetch("/api/health/issues");
+    const payload = await response.json();
+    return payload.success ? payload.data : null;
+  } catch {
+    return null;
+  }
+}
+
 function formatDate(value: string, locale: string) {
   return new Date(value).toLocaleString(locale);
 }
@@ -62,14 +89,16 @@ function EmptyState({ label }: { label: string }) {
 }
 
 function Section({
+  id,
   title,
   children,
 }: {
+  id?: string;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="panel rounded p-4 sm:p-6">
+    <section id={id} className="panel scroll-mt-6 rounded p-4 sm:p-6">
       <h2 className="text-base font-semibold text-foreground">{title}</h2>
       <div className="mt-4">{children}</div>
     </section>
@@ -79,10 +108,14 @@ function Section({
 export default function DiagnosticsPage() {
   const { t, label, locale } = useI18n();
   const [data, setData] = useState<DiagnosticsData | null>(null);
+  const [health, setHealth] = useState<HealthData | null | undefined>(
+    undefined
+  );
   const [loading, setLoading] = useState(true);
 
   async function refreshDiagnostics() {
     setLoading(true);
+    void fetchHealth().then(setHealth);
     const response = await fetch("/api/admin/diagnostics");
     const payload = await response.json();
     if (payload.success) {
@@ -93,6 +126,10 @@ export default function DiagnosticsPage() {
 
   useEffect(() => {
     let active = true;
+
+    void fetchHealth().then((result) => {
+      if (active) setHealth(result);
+    });
 
     async function loadInitialDiagnostics() {
       const response = await fetch("/api/admin/diagnostics");
@@ -139,6 +176,89 @@ export default function DiagnosticsPage() {
           {t("Refresh")}
         </button>
       </div>
+
+      <Section id="checklist" title={t("Connection checklist")}>
+        {health ? (
+          <ul className="space-y-3">
+            {health.checklist.map((item) => (
+              <li
+                key={item.id}
+                className="flex gap-3 border-b border-border pb-3 last:border-0"
+              >
+                <span aria-hidden className="shrink-0 text-base leading-6">
+                  {CHECK_ICONS[item.status]}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">{item.detail}</p>
+                  {item.action && (
+                    <p className="mt-1 text-xs text-foreground">
+                      {item.href ? (
+                        <Link
+                          href={item.href}
+                          className="underline underline-offset-2"
+                        >
+                          {item.action}
+                        </Link>
+                      ) : (
+                        item.action
+                      )}
+                    </p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : health === undefined ? (
+          <div className="h-24" />
+        ) : (
+          <EmptyState label={t("Could not load the checklist.")} />
+        )}
+      </Section>
+
+      <Section title={t("Active alerts")}>
+        {health?.issues.length ? (
+          <div className="space-y-3">
+            {health.issues.map((issue) => (
+              <div
+                key={issue.id}
+                className="rounded border border-border bg-surface/50 p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                  <p className="min-w-0 flex-1 break-words text-sm font-semibold text-foreground">
+                    {issue.title}
+                  </p>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
+                      issue.severity === "critical"
+                        ? "bg-error/10 text-error"
+                        : "bg-warning/10 text-warning"
+                    }`}
+                  >
+                    {issue.severity === "critical" ? t("Critical") : t("Warning")}
+                  </span>
+                </div>
+                <p className="mt-2 break-words text-xs text-muted">
+                  {issue.explanation}
+                </p>
+                <p className="mt-2 text-xs text-foreground">
+                  <Link href={issue.href} className="underline underline-offset-2">
+                    {issue.action}
+                  </Link>
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          health && (
+            <EmptyState
+              label={t("No active alerts. Your automations are running.")}
+            />
+          )
+        )}
+      </Section>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3">
         <div className="panel rounded p-4 sm:p-5">
