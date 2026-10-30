@@ -173,7 +173,7 @@ export default function SeoPageShell({ config }: { config: SeoPageConfig }) {
             href="/login"
             className="mt-8 inline-flex items-center justify-center bg-cyan-300 px-6 py-3 text-sm font-bold text-zinc-950 transition hover:bg-cyan-200"
           >
-            Start free
+            Get started
           </Link>
         </div>
       </section>

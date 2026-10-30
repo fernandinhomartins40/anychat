@@ -1,11 +1,7 @@
 import { EMAIL_PROVIDER_ID, signIn } from "@/lib/auth";
 import { getI18n } from "@/lib/i18n/server";
 import { getCampaignTemplate } from "@/lib/templates/campaign-templates";
-import { DemoNotice } from "@/components/demo-notice";
-import { isPublicDemoHost } from "@/lib/env";
-
-const GITHUB_URL = "https://github.com/diwenne/openreply";
-const SETUP_DOCS_URL = `${GITHUB_URL}/blob/main/docs/setup.md`;
+import Link from "next/link";
 
 export async function generateMetadata() {
   const { t } = await getI18n();
@@ -25,34 +21,6 @@ export default async function LoginPage({
   }>;
 }) {
   const { t } = await getI18n();
-  if (await isPublicDemoHost()) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-6">
-        <div className="w-full max-w-md text-center">
-          <h1 className="text-2xl font-semibold text-foreground">
-            AnyChat
-          </h1>
-          <div className="panel rounded p-8 mt-8 shadow-black/40">
-            <h2 className="text-lg font-semibold text-foreground">
-              {t("Sign-in is off on this demo")}
-            </h2>
-            <p className="mt-3 text-sm leading-relaxed text-muted">
-              {t("This is the public demo — it doesn’t create real accounts or send DMs. To use AnyChat for real, clone it and run your own instance with your own Meta app and domain.")}
-            </p>
-            <a
-              href={SETUP_DOCS_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-indigo-500/25 transition-all hover:shadow-indigo-500/30"
-            >
-              {t("Clone it yourself")} <span aria-hidden="true">↗</span>
-            </a>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const params = await searchParams;
   const checkEmail = params.checkEmail === "1";
   const selectedTemplate = getCampaignTemplate(params.template);
@@ -73,17 +41,15 @@ export default async function LoginPage({
     <div className="min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-foreground">
+          <Link href="/" className="text-2xl font-semibold text-foreground">
             AnyChat
-          </h1>
+          </Link>
           <p className="text-muted text-sm leading-relaxed mt-2">
             {selectedTemplate
               ? t("Sign in to use the {name} template.", { name: selectedTemplate.title })
-              : t("Sign in by email, then connect your Instagram professional account.")}
+              : t("Enter your email to sign in or create your account. We’ll send you a link, no password needed.")}
           </p>
         </div>
-
-        <DemoNotice variant="panel" />
 
         <div className="panel rounded p-8 shadow-black/40">
           {selectedTemplate && !checkEmail && (
@@ -119,7 +85,7 @@ export default async function LoginPage({
                   type="email"
                   required
                   autoComplete="email"
-                  placeholder="you@company.com"
+                  placeholder={t("you@company.com")}
                   className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none transition-colors"
                 />
               </div>
@@ -133,6 +99,22 @@ export default async function LoginPage({
             </form>
           )}
         </div>
+
+        <p className="mt-6 text-center text-xs leading-relaxed text-muted">
+          {t("By continuing, you agree to the AnyChat Terms of Use and Privacy Policy.")}
+          <br />
+          <Link href="/terms" className="underline underline-offset-2 hover:text-foreground">
+            {t("Terms of Use")}
+          </Link>
+          {" · "}
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-foreground">
+            {t("Privacy Policy")}
+          </Link>
+          {" · "}
+          <Link href="/" className="underline underline-offset-2 hover:text-foreground">
+            {t("Back to home")}
+          </Link>
+        </p>
       </div>
     </div>
   );
