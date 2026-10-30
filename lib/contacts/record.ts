@@ -85,16 +85,32 @@ export async function recordContactInteractionSafely(input: ContactInteraction) 
   }
 }
 
+export type InboundDmContact = {
+  contactId: string;
+  /** InstagramAccount.id (our row). */
+  instagramAccountId: string;
+  workspaceId: string;
+  /**
+   * True only for the call that created the contact: nobody (no comment, no
+   * earlier DM) had reached this account from that igsid before. A retried job
+   * sees false, since the first attempt already created the row.
+   */
+  created: boolean;
+};
+
 /**
  * Records the sender of an inbound DM. The webhook only knows the business
  * account's Instagram id, so resolve our account row first; a connection id,
  * when the job has one, pins the lookup to that exact connection.
+ *
+ * Returns the contact and whether this message created it (used for the
+ * welcome message), or null when nothing could be recorded. Never throws.
  */
 export async function recordInboundDmContactSafely(input: {
   accountConnectionId?: string;
   instagramUserId: string;
   senderId: string;
-}) {
+}): Promise<InboundDmContact | null> {
   try {
     const account = await prisma.instagramAccount.findFirst({
       where: {
@@ -103,16 +119,40 @@ export async function recordInboundDmContactSafely(input: {
       },
       select: { id: true, workspaceId: true },
     });
-    if (!account) return;
-    await recordContactInteraction({
+    if (!account) return null;
+    const at = new Date();
+    // INSERT ... ON CONFLICT DO NOTHING: exactly one concurrent job can see
+    // count 1, so "first-ever message" is decided once per person.
+    const inserted = await prisma.contact.createMany({
+      data: [
+        {
+          workspaceId: account.workspaceId,
+          instagramAccountId: account.id,
+          igsid: input.senderId,
+          firstSeenAt: at,
+          lastInteractionAt: at,
+          lastSource: "DM",
+        },
+      ],
+      skipDuplicates: true,
+    });
+    const contact = await recordContactInteraction({
       workspaceId: account.workspaceId,
       instagramAccountId: account.id,
       igsid: input.senderId,
       source: "DM",
+      at,
     });
+    return {
+      contactId: contact.id,
+      instagramAccountId: account.id,
+      workspaceId: account.workspaceId,
+      created: inserted.count > 0,
+    };
   } catch (error) {
     console.error("[contacts] failed to record inbound DM", {
       error: error instanceof Error ? error.message : String(error),
     });
+    return null;
   }
 }

@@ -163,6 +163,8 @@ model InstagramAccount {
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
   contacts          Contact[]
+  autoReply         AccountAutoReply?
+  autoReplyLogs     AutoReplyLog[]
 
   @@index([workspaceId])
 }
@@ -490,4 +492,54 @@ model ContactTag {
 enum ContactSource {
   COMMENT
   DM
+}
+
+// Account-level welcome message and default reply (PRD A5). One row per
+// connected account, created on first save; no row means both are off.
+model AccountAutoReply {
+  id                        String   @id @default(cuid())
+  instagramAccountId        String   @unique
+  welcomeEnabled            Boolean  @default(false)
+  welcomeMessage            String   @default("")
+  defaultReplyEnabled       Boolean  @default(false)
+  defaultReplyMessage       String   @default("")
+  // At most one default reply per person per this many hours (1–168).
+  defaultReplyCooldownHours Int      @default(24)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+}
+
+enum AutoReplyKind {
+  WELCOME
+  DEFAULT_REPLY
+}
+
+// One row per inbound DM answered by an account-level auto reply. The unique
+// key on the inbound message id makes a retried job resume the same decision
+// instead of sending twice; SENT rows also drive the default-reply cooldown.
+// Kept apart from DmLog because DmLog belongs to a campaign.
+model AutoReplyLog {
+  id                  String        @id @default(cuid())
+  workspaceId         String
+  instagramAccountId  String
+  recipientId         String
+  recipientName       String?
+  inboundMessageId    String
+  inboundText         String
+  kind                AutoReplyKind
+  status              DmStatus      @default(PENDING)
+  attempts            Int           @default(0)
+  errorMessage        String?
+  deliveryUnconfirmed Boolean       @default(false)
+  sentAt              DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([instagramAccountId, inboundMessageId])
+  @@index([instagramAccountId, recipientId, createdAt])
+  @@index([workspaceId, createdAt])
 }
