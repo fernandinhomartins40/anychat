@@ -213,7 +213,7 @@ If your primary domain ever changes, update this callback URL to the new domain.
 
 Real comment webhooks are only delivered when the app is in Live state. In Development mode, only the console Test button delivers events. This is the single most common reason for "I set everything up and nothing happens."
 
-Go to the Publish item in the left sidebar. Set the privacy policy, terms of service, and data deletion URLs first, or it will not let you publish. OpenReply ships these pages, on your Vercel domain:
+Go to the Publish item in the left sidebar. Set the privacy policy, terms of service, and data deletion URLs first, or it will not let you publish. AnyChat ships these pages (in Portuguese, filled with the company data from the `NEXT_PUBLIC_COMPANY_*` variables; see [legal.md](legal.md), and have a lawyer review them), on your domain:
 
 ```
 https://your-app.vercel.app/privacy

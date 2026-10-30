@@ -3,15 +3,15 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AnyChat - Open source Instagram comment-to-DM automation",
+  title: "AnyChat - Automação de Instagram: comentou, recebeu a DM",
   description:
-    "A free, self-hosted ManyChat alternative. Send an Instagram DM automatically when someone comments a keyword on your post or reel, using the official Meta API.",
+    "Envie uma DM automática para quem comenta a palavra-chave no seu post ou Reel do Instagram. Sem editor de fluxos, pela API oficial da Meta e sem pedir sua senha.",
   keywords: [
-    "instagram automation",
-    "comment to DM",
-    "instagram private replies",
-    "social commerce",
-    "manychat alternative",
+    "automação instagram",
+    "comentário para DM",
+    "resposta automática instagram",
+    "DM automática",
+    "alternativa ao manychat",
   ],
   manifest: "/manifest.webmanifest",
   appleWebApp: {
