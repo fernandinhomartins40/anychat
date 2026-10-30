@@ -94,6 +94,19 @@ export function InstagramConnectNotice() {
     );
   }
 
+  if (status === "plan_limit") {
+    return (
+      <Notice tone="warning" title={t("Instagram account limit reached")}>
+        <p>
+          {t("Your plan does not allow more Instagram accounts. Upgrade to connect this one.")}{" "}
+          <a href="/settings#billing" className="font-semibold underline underline-offset-4">
+            {t("See plans")}
+          </a>
+        </p>
+      </Notice>
+    );
+  }
+
   const known = MESSAGES[status];
   if (!known) return null;
 

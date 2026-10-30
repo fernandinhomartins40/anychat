@@ -75,6 +75,15 @@ model Workspace {
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
+  // Hosted billing (lib/billing). Ignored when STRIPE_SECRET_KEY is unset:
+  // self-hosted instances are unlimited regardless of these values.
+  plan                 Plan               @default(FREE)
+  subscriptionStatus   SubscriptionStatus @default(NONE)
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  currentPeriodEnd     DateTime?
+
   zernioConnection  ZernioConnection?
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
@@ -88,8 +97,39 @@ model Workspace {
   serviceKeys       ServiceKey[]
   contacts          Contact[]
   tags              Tag[]
+  billingEvents     BillingEvent[]
 
   @@index([ownerId])
+}
+
+enum Plan {
+  FREE
+  PRO
+  AGENCY
+}
+
+enum SubscriptionStatus {
+  NONE
+  TRIALING
+  ACTIVE
+  INCOMPLETE
+  PAST_DUE
+  UNPAID
+  PAUSED
+  CANCELED
+}
+
+// Processed Stripe webhook events, keyed by Stripe's event id so a retried
+// delivery is acknowledged without being applied twice.
+model BillingEvent {
+  id            String     @id @default(cuid())
+  stripeEventId String     @unique
+  type          String
+  workspaceId   String?
+  workspace     Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  createdAt     DateTime   @default(now())
+
+  @@index([workspaceId])
 }
 
 model WorkspaceMember {

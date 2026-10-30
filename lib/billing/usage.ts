@@ -1,14 +1,25 @@
 import { prisma } from "@/lib/db/client";
-import type { Prisma } from "@/app/generated/prisma/client";
+import type { Plan, Prisma, SubscriptionStatus } from "@/app/generated/prisma/client";
+import { resolveWorkspacePlan } from "@/lib/billing/plans";
 
-// Self-hosted build: usage is still counted per month so the dashboard can
-// report volume, but no cap is enforced. Meta's own rate limits apply instead.
-// Must stay within PostgreSQL int4 range, since dmsSentThisPeriod is an Int
-// column and this value is used in a `less-than` comparison against it. Two
-// billion DMs/month is effectively unlimited without overflowing the column.
-const MONTHLY_DM_LIMIT = 2_000_000_000;
+// Used when billing is disabled (self-hosted) and the plan has no cap. Must
+// stay within PostgreSQL int4 range, since dmsSentThisPeriod is an Int column
+// and this value is used in a `less-than` comparison against it. Two billion
+// DMs/month is effectively unlimited without overflowing the column.
+export const UNLIMITED_MONTHLY_DM_LIMIT = 2_000_000_000;
 
-function getMonthStart(date = new Date()): Date {
+/** Monthly DM cap for a workspace: its effective plan's limit, or unlimited. */
+export function getMonthlyDMLimit(workspace: {
+  plan: Plan;
+  subscriptionStatus: SubscriptionStatus;
+}): number {
+  return (
+    resolveWorkspacePlan(workspace).limits.maxDMsPerMonth ??
+    UNLIMITED_MONTHLY_DM_LIMIT
+  );
+}
+
+export function getMonthStart(date = new Date()): Date {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
@@ -55,6 +66,8 @@ export async function reserveWorkspaceDMSend(
     const workspace = await tx.workspace.findUnique({
       where: { id: workspaceId },
       select: {
+        plan: true,
+        subscriptionStatus: true,
         usagePeriodStart: true,
         dmsSentThisPeriod: true,
       },
@@ -70,7 +83,7 @@ export async function reserveWorkspaceDMSend(
       };
     }
 
-    const limit = MONTHLY_DM_LIMIT;
+    const limit = getMonthlyDMLimit(workspace);
 
     if (workspace.dmsSentThisPeriod >= limit) {
       return {
@@ -128,6 +141,8 @@ export async function canSendDMForWorkspace(workspaceId: string): Promise<{
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
     select: {
+      plan: true,
+      subscriptionStatus: true,
       dmsSentThisPeriod: true,
     },
   });
@@ -136,7 +151,7 @@ export async function canSendDMForWorkspace(workspaceId: string): Promise<{
     return { allowed: false, remaining: 0, limit: 0 };
   }
 
-  const limit = MONTHLY_DM_LIMIT;
+  const limit = getMonthlyDMLimit(workspace);
   const remaining = Math.max(0, limit - workspace.dmsSentThisPeriod);
 
   return {

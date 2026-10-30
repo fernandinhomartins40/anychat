@@ -61,8 +61,9 @@ export async function GET(request: NextRequest) {
     });
 
     if (!connection.allowed) {
+      // plan_limit: the notice on /settings links to the billing section.
       return NextResponse.redirect(
-        `${baseUrl}/settings?instagram=already_connected`
+        `${baseUrl}/settings?instagram=${connection.reason}`
       );
     }
 

@@ -5,7 +5,7 @@ import { MetaApiError } from '@/lib/meta/client';
 import { canManageWorkspace, getCurrentWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-access';
 
 export class ConnectionError extends Error {
-  constructor(message: string, public status = 400) { super(message); }
+  constructor(message: string, public status = 400, public code?: string) { super(message); }
 }
 
 export function withZernioManagement(handler: (context: WorkspaceContext, request: Request) => Promise<Response>) {
@@ -27,7 +27,7 @@ export function withZernioManagement(handler: (context: WorkspaceContext, reques
       return await handler(context, request);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ success: false, error: 'This connection was already added. Refresh and try again.' }, { status: 409 });
-      if (error instanceof ConnectionError) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
+      if (error instanceof ConnectionError) return NextResponse.json({ success: false, error: error.message, ...(error.code ? { code: error.code } : {}) }, { status: error.status });
       if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: 'Unexpected Zernio response. Please retry or contact support.' }, { status: 502 });
       if (error instanceof MetaApiError) {
         const message = error.code === 401 ? 'The Zernio API key is invalid or expired.' : error.code === 403 ? 'Use an unrestricted, read-write Zernio key with access to this profile and Inbox.' : error.code === 402 ? 'This Zernio account needs Inbox access. Check your Zernio plan.' : error.message;

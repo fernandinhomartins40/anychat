@@ -47,6 +47,7 @@ npm run worker                # outro terminal: processa e envia as DMs
 ```
 
 Configuração completa (app na Meta, webhook, deploy): [docs/setup.md](docs/setup.md).
+Planos e cobrança com Stripe (opcional; sem `STRIPE_SECRET_KEY` tudo fica ilimitado): [docs/billing.md](docs/billing.md).
 
 ## Testes
 
