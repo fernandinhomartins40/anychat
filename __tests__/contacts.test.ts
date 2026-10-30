@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockPrisma = vi.hoisted(() => ({
-  contact: { upsert: vi.fn() },
+  contact: { upsert: vi.fn(), createMany: vi.fn() },
   tag: { createMany: vi.fn(), findMany: vi.fn() },
   contactTag: { createMany: vi.fn() },
   instagramAccount: { findFirst: vi.fn() },
@@ -18,6 +18,7 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.contact.upsert.mockResolvedValue({ id: "contact_1" });
+  mockPrisma.contact.createMany.mockResolvedValue({ count: 0 });
   mockPrisma.tag.findMany.mockResolvedValue([{ id: "tag_lead" }, { id: "tag_vip" }]);
 });
 
@@ -120,6 +121,32 @@ describe("recordInboundDmContactSafely", () => {
         where: { instagramAccountId_igsid: { instagramAccountId: "acc_1", igsid: "s_1" } },
       })
     );
+  });
+
+  it("reports whether this DM created the contact", async () => {
+    mockPrisma.instagramAccount.findFirst.mockResolvedValue({ id: "acc_1", workspaceId: "ws_1" });
+    mockPrisma.contact.createMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(
+      recordInboundDmContactSafely({ instagramUserId: "ig_1", senderId: "s_new" })
+    ).resolves.toEqual({ contactId: "contact_1", instagramAccountId: "acc_1", workspaceId: "ws_1", created: true });
+    expect(mockPrisma.contact.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skipDuplicates: true })
+    );
+
+    await expect(
+      recordInboundDmContactSafely({ instagramUserId: "ig_1", senderId: "s_new" })
+    ).resolves.toMatchObject({ created: false });
+  });
+
+  it("returns null instead of throwing when the database fails", async () => {
+    mockPrisma.instagramAccount.findFirst.mockRejectedValue(new Error("db down"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      recordInboundDmContactSafely({ instagramUserId: "ig_1", senderId: "s_1" })
+    ).resolves.toBeNull();
+    log.mockRestore();
   });
 
   it("does nothing for an unknown account", async () => {

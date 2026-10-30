@@ -35,6 +35,15 @@ const {
     instagramAccount: {
       findUnique: vi.fn(),
     },
+    accountAutoReply: {
+      findUnique: vi.fn(),
+    },
+    autoReplyLog: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
     operationalEvent: {
       create: vi.fn(),
     },
@@ -251,6 +260,13 @@ beforeEach(() => {
     workspaceId: "workspace_123",
   });
   mockPrisma.operationalEvent.create.mockResolvedValue({});
+  mockPrisma.accountAutoReply.findUnique.mockResolvedValue(null);
+  mockPrisma.autoReplyLog.findUnique.mockReset().mockResolvedValue(null);
+  mockPrisma.autoReplyLog.findFirst.mockReset().mockResolvedValue(null);
+  mockPrisma.autoReplyLog.create.mockReset().mockImplementation(
+    async ({ data }: { data: Record<string, unknown> }) => ({ status: "PENDING", deliveryUnconfirmed: false, ...data })
+  );
+  mockPrisma.autoReplyLog.update.mockReset().mockResolvedValue({});
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
   mockReserveWorkspaceDMSend.mockResolvedValue({
@@ -1831,5 +1847,229 @@ describe("DM Worker — contacts", () => {
     expect(recordContactInteractionSafely).toHaveBeenCalledWith(
       expect.objectContaining({ igsid: "sender_2", source: "DM", tagNames: ["vip"] })
     );
+  });
+});
+
+describe("DM Worker — account welcome message and default reply", () => {
+  const settings = {
+    instagramAccountId: "ig_account_row_1",
+    welcomeEnabled: true,
+    welcomeMessage: "Welcome {username}!",
+    defaultReplyEnabled: true,
+    defaultReplyMessage: "We'll reply soon, {username}.",
+    defaultReplyCooldownHours: 24,
+    instagramAccount: {
+      id: "ig_account_row_1",
+      workspaceId: "workspace_123",
+      instagramId: "ig_456",
+      accessToken: "encrypted_token_abc",
+    },
+  };
+
+  function contact(created: boolean) {
+    return {
+      contactId: "contact_1",
+      instagramAccountId: "ig_account_row_1",
+      workspaceId: "workspace_123",
+      created,
+    };
+  }
+
+  function messageJob(messageId = "mid_auto", attemptsMade = 0) {
+    return {
+      name: "process-message",
+      data: { instagramAccountId: "ig_456", messageId, messageText: "hello", senderId: "sender_9" },
+      id: `message_job_${messageId}`,
+      attemptsMade,
+    };
+  }
+
+  beforeEach(() => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...mockAutomation, dmTriggerEnabled: true, requireFollow: false },
+    ]);
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+    mockPrisma.accountAutoReply.findUnique.mockResolvedValue(settings);
+    vi.mocked(recordInboundDmContactSafely).mockResolvedValue(contact(false));
+  });
+
+  it("sends the welcome message on a person's first-ever DM, and only the welcome", async () => {
+    vi.mocked(recordInboundDmContactSafely).mockResolvedValue(contact(true));
+
+    await getProcessor()(messageJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "sender_9",
+      "Welcome commenter_user!"
+    );
+    expect(mockPrisma.autoReplyLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: "WELCOME",
+        inboundMessageId: "mid_auto",
+        recipientId: "sender_9",
+        workspaceId: "workspace_123",
+      }),
+    });
+    expect(mockPrisma.autoReplyLog.update).toHaveBeenLastCalledWith({
+      where: {
+        instagramAccountId_inboundMessageId: {
+          instagramAccountId: "ig_account_row_1",
+          inboundMessageId: "mid_auto",
+        },
+      },
+      data: expect.objectContaining({ status: "SENT", recipientName: "commenter_user" }),
+    });
+    expect(mockReserveWorkspaceDMSend).toHaveBeenCalledWith("workspace_123");
+  });
+
+  it("does not welcome a returning person a second time", async () => {
+    mockPrisma.accountAutoReply.findUnique.mockResolvedValue({ ...settings, defaultReplyEnabled: false });
+
+    await getProcessor()(messageJob("mid_second"));
+
+    expect(mockPrisma.autoReplyLog.create).not.toHaveBeenCalled();
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends the default reply when no campaign matches and the person is outside the cooldown", async () => {
+    const before = Date.now();
+    await getProcessor()(messageJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "sender_9",
+      "We'll reply soon, commenter_user."
+    );
+    const cooldownQuery = mockPrisma.autoReplyLog.findFirst.mock.calls[0][0];
+    expect(cooldownQuery.where).toMatchObject({
+      instagramAccountId: "ig_account_row_1",
+      recipientId: "sender_9",
+    });
+    const since = cooldownQuery.where.createdAt.gte.getTime();
+    expect(before - since).toBeGreaterThanOrEqual(24 * 3600_000 - 1000);
+    expect(before - since).toBeLessThanOrEqual(24 * 3600_000 + 1000);
+    expect(mockPrisma.autoReplyLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "DEFAULT_REPLY" }),
+    });
+  });
+
+  it("holds the default reply back while the cooldown is running", async () => {
+    mockPrisma.autoReplyLog.findFirst.mockResolvedValue({ id: "recent_reply" });
+
+    await getProcessor()(messageJob("mid_again"));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.autoReplyLog.create).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+  });
+
+  it("sends neither when a DM campaign keyword matches", async () => {
+    vi.mocked(recordInboundDmContactSafely).mockResolvedValue(contact(true));
+    mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
+
+    await getProcessor()(messageJob());
+
+    expect(mockPrisma.accountAutoReply.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.autoReplyLog.create).not.toHaveBeenCalled();
+    // The one DM is the campaign's.
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "sender_9",
+      "Hey commenter_user! Here is the link: https://example.com"
+    );
+  });
+
+  it("does not send again when a retried job finds the reply already sent", async () => {
+    mockPrisma.autoReplyLog.findUnique.mockResolvedValue({
+      kind: "WELCOME",
+      status: "SENT",
+      deliveryUnconfirmed: false,
+    });
+
+    await getProcessor()(messageJob("mid_auto", 1));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.autoReplyLog.create).not.toHaveBeenCalled();
+  });
+
+  it("does not resend a reply Meta may have delivered", async () => {
+    mockPrisma.autoReplyLog.findUnique.mockResolvedValue({
+      kind: "DEFAULT_REPLY",
+      status: "FAILED",
+      deliveryUnconfirmed: true,
+    });
+
+    await getProcessor()(messageJob("mid_auto", 1));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed welcome as the welcome even though the contact now exists", async () => {
+    mockPrisma.autoReplyLog.findUnique.mockResolvedValue({
+      kind: "WELCOME",
+      status: "FAILED",
+      deliveryUnconfirmed: false,
+    });
+
+    await getProcessor()(messageJob("mid_auto", 1));
+
+    expect(mockPrisma.autoReplyLog.findFirst).not.toHaveBeenCalled();
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "sender_9",
+      "Welcome commenter_user!"
+    );
+  });
+
+  it("releases the usage reservation and records the failure when the send fails", async () => {
+    vi.mocked(recordInboundDmContactSafely).mockResolvedValue(contact(true));
+    mockSendDirectMessage.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(getProcessor()(messageJob())).rejects.toThrow("boom");
+
+    expect(mockReleaseWorkspaceDMReservation).toHaveBeenCalledWith("workspace_123", usagePeriodStart);
+    expect(mockPrisma.autoReplyLog.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED", errorMessage: "boom", attempts: 1 }),
+      })
+    );
+  });
+
+  it("skips without sending when the monthly DM limit is reached", async () => {
+    mockReserveWorkspaceDMSend.mockResolvedValueOnce({ allowed: false, limit: 2000 });
+
+    await getProcessor()(messageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.autoReplyLog.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SKIPPED_PLAN_LIMIT" }) })
+    );
+  });
+
+  it("lets only one of two concurrent copies of the job send", async () => {
+    mockPrisma.autoReplyLog.create.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" })
+    );
+
+    await getProcessor()(messageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the account has no auto replies configured", async () => {
+    mockPrisma.accountAutoReply.findUnique.mockResolvedValue(null);
+    vi.mocked(recordInboundDmContactSafely).mockResolvedValue(contact(true));
+
+    await getProcessor()(messageJob());
+
+    expect(mockPrisma.autoReplyLog.findUnique).not.toHaveBeenCalled();
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
   });
 });

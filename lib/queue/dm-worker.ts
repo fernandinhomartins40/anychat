@@ -46,7 +46,13 @@ import {
   reserveWorkspaceDMSend,
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
-import { recordContactInteractionSafely, recordInboundDmContactSafely } from "@/lib/contacts/record";
+import {
+  recordContactInteractionSafely,
+  recordInboundDmContactSafely,
+  type InboundDmContact,
+} from "@/lib/contacts/record";
+import { cooldownMs } from "@/lib/auto-replies/settings";
+import type { AutoReplyKind, Prisma } from "@/app/generated/prisma/client";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -1311,11 +1317,15 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const dedupeId = `dm:${messageId}`;
 
   // Every inbound DM makes the sender a contact, matched campaign or not.
-  await recordInboundDmContactSafely({
+  const inboundContact = await recordInboundDmContactSafely({
     accountConnectionId: job.data.accountConnectionId,
     instagramUserId: instagramAccountId,
     senderId,
   });
+
+  // A keyword campaign match wins over the account's welcome/default reply,
+  // whether or not that campaign ends up sending (dedup, plan limit...).
+  let matchedCampaign = false;
 
   for (const automation of automations) {
     const matchResult = automation.matchAnyWord
@@ -1327,6 +1337,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         );
 
     if (!matchResult.matched) continue;
+    matchedCampaign = true;
 
     const existingLog = await prisma.dmLog.findUnique({
       where: {
@@ -1559,6 +1570,174 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       throw error;
     }
   }
+
+  if (!matchedCampaign && inboundContact) {
+    await sendAccountAutoReply(job, inboundContact);
+  }
+}
+
+/**
+ * Account-level welcome message / default reply (PRD A5) for an inbound DM no
+ * campaign matched. At most one auto reply per inbound message: the welcome
+ * when this message created the contact (first-ever DM), otherwise the default
+ * reply unless this person got any auto reply within the cooldown.
+ *
+ * The decision is persisted in AutoReplyLog, keyed on the inbound message id,
+ * before sending. A retried job resumes that row (same kind, even though the
+ * contact is no longer new) and never sends again once it is SENT, skipped or
+ * possibly delivered. An inbound DM opens Meta's 24h window, so replying now is
+ * always inside it.
+ */
+async function sendAccountAutoReply(
+  job: Job<ProcessMessageJob>,
+  contact: InboundDmContact
+): Promise<void> {
+  const { messageId, messageText, senderId } = job.data;
+
+  const settings = await prisma.accountAutoReply.findUnique({
+    where: { instagramAccountId: contact.instagramAccountId },
+    include: { instagramAccount: true },
+  });
+  if (!settings) return;
+
+  const messages: Record<AutoReplyKind, string | null> = {
+    WELCOME: settings.welcomeEnabled ? settings.welcomeMessage.trim() || null : null,
+    DEFAULT_REPLY: settings.defaultReplyEnabled
+      ? settings.defaultReplyMessage.trim() || null
+      : null,
+  };
+  if (!messages.WELCOME && !messages.DEFAULT_REPLY) return;
+
+  const logKey = {
+    instagramAccountId_inboundMessageId: {
+      instagramAccountId: contact.instagramAccountId,
+      inboundMessageId: messageId,
+    },
+  };
+
+  let log = await prisma.autoReplyLog.findUnique({ where: logKey });
+  if (log) {
+    // Only a PENDING row (attempt crashed) or a confirmed FAILED one is
+    // retried; anything else was sent, deliberately skipped, or may have
+    // reached the person already.
+    const retryable =
+      (log.status === "PENDING" || log.status === "FAILED") &&
+      !log.deliveryUnconfirmed;
+    if (!retryable) return;
+  } else {
+    let kind: AutoReplyKind | null = null;
+    if (contact.created && messages.WELCOME) {
+      kind = "WELCOME";
+    } else if (messages.DEFAULT_REPLY) {
+      const recent = await prisma.autoReplyLog.findFirst({
+        where: {
+          instagramAccountId: contact.instagramAccountId,
+          recipientId: senderId,
+          createdAt: {
+            gte: new Date(Date.now() - cooldownMs(settings.defaultReplyCooldownHours)),
+          },
+          OR: [{ status: "SENT" }, { deliveryUnconfirmed: true }],
+        },
+        select: { id: true },
+      });
+      if (!recent) kind = "DEFAULT_REPLY";
+    }
+    if (!kind) return;
+
+    try {
+      log = await prisma.autoReplyLog.create({
+        data: {
+          workspaceId: contact.workspaceId,
+          instagramAccountId: contact.instagramAccountId,
+          recipientId: senderId,
+          inboundMessageId: messageId,
+          inboundText: messageText,
+          kind,
+        },
+      });
+    } catch (error) {
+      // A concurrent copy of this job claimed the message first.
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "P2002"
+      ) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  const template = messages[log.kind];
+  // Turned off between the original attempt and this retry.
+  if (!template) return;
+
+  const markLog = (data: Prisma.AutoReplyLogUpdateInput) =>
+    prisma.autoReplyLog.update({ where: logKey, data });
+
+  const account = settings.instagramAccount;
+  if (!hasInstagramCredentials(account)) {
+    await markLog({ status: "FAILED", errorMessage: "No Instagram access token available" });
+    return;
+  }
+
+  let context: InstagramContext;
+  try {
+    context = await createInstagramContext(account, `${job.id}:autoreply`);
+  } catch {
+    await markLog({ status: "FAILED", errorMessage: "Failed to decrypt Instagram access token" });
+    return;
+  }
+
+  let recipientName: string | null = null;
+  if (/\{username\}/i.test(template)) {
+    try {
+      recipientName = await resolveRecipientName({
+        context,
+        workspaceId: contact.workspaceId,
+        recipientId: senderId,
+      });
+    } catch {
+      recipientName = null;
+    }
+  }
+
+  const usage = await reserveWorkspaceDMSend(contact.workspaceId);
+  if (!usage.allowed) {
+    await markLog({
+      status: "SKIPPED_PLAN_LIMIT",
+      errorMessage: `Monthly DM limit reached (${usage.limit})`,
+    });
+    return;
+  }
+
+  try {
+    await sendDirectMessage({
+      context,
+      instagramAccountId: account.instagramId,
+      userId: senderId,
+      message: renderMessageWithoutLink({ message: template, commenterName: recipientName }),
+    });
+  } catch (error) {
+    await releaseWorkspaceDMReservation(contact.workspaceId, usage.periodStart);
+    await markLog({
+      status: "FAILED",
+      recipientName,
+      attempts: job.attemptsMade + 1,
+      errorMessage: formatError(error),
+      deliveryUnconfirmed: isDeliveryUnconfirmed(error),
+    });
+    throw error;
+  }
+
+  await markLog({
+    status: "SENT",
+    recipientName,
+    attempts: job.attemptsMade + 1,
+    sentAt: new Date(),
+    errorMessage: null,
+  });
 }
 
 async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
