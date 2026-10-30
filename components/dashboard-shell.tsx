@@ -4,6 +4,7 @@ import { useState } from "react";
 import Sidebar from "@/components/sidebar";
 import TopBar from "@/components/top-bar";
 import HealthBanner from "@/components/health-banner";
+import MobileNav from "@/components/mobile-nav";
 
 interface DashboardShellProps {
   children: React.ReactNode;
@@ -41,13 +42,15 @@ export default function DashboardShell({
             allow horizontal scrolling too, which lets a wide child drag the
             whole page sideways on a phone. */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="px-4 lg:px-8 py-5 sm:py-6 max-w-7xl mx-auto">
+          {/* Bottom padding clears the phone tab bar. */}
+          <div className="mx-auto max-w-6xl px-4 pt-5 pb-28 sm:pt-6 lg:px-8 lg:pb-10">
             {/* Active alerts: an automation must never stop silently. */}
             <HealthBanner />
             {children}
           </div>
         </main>
       </div>
+      <MobileNav />
     </div>
   );
 }

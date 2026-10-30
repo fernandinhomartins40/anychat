@@ -1,23 +1,52 @@
 @import "tailwindcss";
 
-/* ManyChat Alternative — Design System
-   Plain and functional. No gradients, glass, glow, or animation. */
+/* AnyChat design system — "Aurora".
+   Colorful and friendly, built for people who have never used an automation
+   tool. Full rationale, rules and the 3-step flows: docs/design-system.md.
+   Text colors are chosen to pass WCAG AA (4.5:1) on white and on the page
+   background; the bright hues (sun, mint, sky, pink) are for fills and
+   decoration, never for small text. */
+
+@font-face {
+  font-family: "Plus Jakarta Sans";
+  src: url("/fonts/plus-jakarta-sans-latin.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
 
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #18181b;
-  --color-surface: #f7f7f8;
-  --color-surface-hover: #efeff1;
-  --color-border: #e4e4e7;
-  --color-border-hover: #d4d4d8;
-  --color-muted: #71717a;
-  --color-accent: #f97316;
-  --color-accent-hover: #ea580c;
-  --color-success: #16a34a;
-  --color-error: #dc2626;
-  --color-warning: #d97706;
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: #f6f4ff;
+  --color-foreground: #1b1530;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f1edfe;
+  --color-border: #e6e0f6;
+  --color-border-hover: #d3c9f2;
+  --color-muted: #625a80;
+  --color-accent: #7c3aed;
+  --color-accent-hover: #6d28d9;
+  --color-success: #047857;
+  --color-error: #c81e1e;
+  --color-warning: #b45309;
+
+  /* Brand hues and their soft tints (backgrounds, icon tiles, chips). */
+  --color-violet: #7c3aed;
+  --color-violet-soft: #ede9fe;
+  --color-pink: #db2777;
+  --color-pink-soft: #fce7f3;
+  --color-sun: #f59e0b;
+  --color-sun-soft: #fef3c7;
+  --color-mint: #10b981;
+  --color-mint-soft: #d1fae5;
+  --color-sky: #0ea5e9;
+  --color-sky-soft: #e0f2fe;
+  --color-ink: #1b1530;
+
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, monospace;
+
+  --shadow-card: 0 1px 2px rgb(27 21 48 / 0.04), 0 4px 16px rgb(76 29 149 / 0.06);
+  --shadow-pop: 0 10px 30px rgb(124 58 237 / 0.22);
 }
 
 html {
@@ -55,10 +84,31 @@ select:focus-visible {
   }
 }
 
-/* Panel — flat container. Replaces .glass / .glass-strong. */
+/* Panel — the card every page is built from. */
 .panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+  border-radius: 1.25rem;
+  box-shadow: var(--shadow-card);
+}
+
+/* Signature gradient: primary buttons, the logo mark, hero highlights. */
+.bg-aurora {
+  background-image: linear-gradient(135deg, #7c3aed 0%, #db2777 55%, #f59e0b 100%);
+}
+.text-aurora {
+  background-image: linear-gradient(135deg, #7c3aed 0%, #db2777 60%, #ea580c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* Soft wash for page heroes and the onboarding card. */
+.bg-aurora-soft {
+  background-image:
+    radial-gradient(60% 80% at 0% 0%, #ede9fe 0%, transparent 70%),
+    radial-gradient(50% 70% at 100% 0%, #fce7f3 0%, transparent 70%),
+    radial-gradient(60% 80% at 100% 100%, #fef3c7 0%, transparent 70%),
+    #ffffff;
 }
 
 /* Kept as no-op aliases so existing markup degrades to plain surfaces
@@ -67,14 +117,23 @@ select:focus-visible {
 .glass-strong {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
+  border-radius: 1.25rem;
 }
 
 .gradient-mesh {
   background: none;
 }
 
+/* One short entrance animation, used sparingly. Reduced-motion users get
+   it switched off by the rule below. */
+@keyframes anychat-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
 .animate-fade-in,
-.animate-slide-in,
+.animate-slide-in {
+  animation: anychat-rise 220ms ease-out both;
+}
 .animate-pulse-glow,
 .stagger > * {
   animation: none;
