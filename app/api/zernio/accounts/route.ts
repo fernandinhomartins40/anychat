@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { checkInstagramAccountLimit } from '@/lib/instagram-accounts';
 import { decryptToken } from '@/lib/meta/oauth';
 import { withConnectionLock } from '@/lib/zernio/lock-connection';
 import { loadConnection } from '@/lib/zernio/load-connection';
@@ -19,6 +20,8 @@ export const POST = withZernioManagement(async ({ workspaceId }, request) => {
     if (!current || current.profileId !== connection.profileId || current.webhookId !== connection.webhookId || decryptToken(current.apiKey) !== connection.apiKey) throw new ConnectionError('Connection settings changed. Refresh and try again.');
     const existing = await tx.instagramAccount.findUnique({ where: { instagramId: remote.instagramId } });
     if (existing && (existing.workspaceId !== workspaceId || existing.provider !== 'ZERNIO')) throw new ConnectionError('This Instagram account is already connected. Existing connections are not migrated automatically.', 409);
+    const planCheck = await checkInstagramAccountLimit(workspaceId, remote.instagramId, tx);
+    if (!planCheck.allowed) throw new ConnectionError(`Your plan allows ${planCheck.limit} Instagram account(s). Upgrade in Settings → Plan & billing (/settings#billing) to connect more.`, 402, 'plan_limit');
     const data = { username: remote.username, name: remote.name, zernioAccountId: remote.id, webhookSubscribed: true };
     if (existing) {
       const updated = await tx.instagramAccount.updateMany({

@@ -20,6 +20,7 @@ export function ZernioConnection({ canManage }: { canManage: boolean }) {
   const [profileId, setProfileId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [planLimit, setPlanLimit] = useState(false);
   const refresh = useCallback(async () => {
     const response = await fetch('/api/zernio/settings', { cache: 'no-store' });
     const result = await response.json();
@@ -37,10 +38,11 @@ export function ZernioConnection({ canManage }: { canManage: boolean }) {
   }, [canManage, refresh]);
 
   async function act({ path = 'settings', method, body }: { path?: string; method: string; body?: unknown }) {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setPlanLimit(false);
     try {
       const response = await fetch(`/api/zernio/${path}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
       const result = await response.json();
+      if (result.code === 'plan_limit') setPlanLimit(true);
       if (!result.success) throw new Error(result.error);
       setApiKey('');
       if (result.data?.authUrl) { window.location.assign(result.data.authUrl); return; }
@@ -59,7 +61,7 @@ export function ZernioConnection({ canManage }: { canManage: boolean }) {
       <p className="mt-4 text-sm leading-6">{t("Connect Instagram without creating your own Meta developer app. Zernio is an optional paid third-party service. Your campaigns and hosting stay in AnyChat.")}</p>
       <p className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm"><a className="underline underline-offset-4" href={zernioLink({ path: '/signup', placement: 'settings-signup' })} target="_blank" rel="noopener noreferrer">{t("Get a Zernio API key")}</a><a className="underline underline-offset-4" href={zernioLink({ path: '/pricing', placement: 'settings-pricing' })} target="_blank" rel="noopener noreferrer">{t("View pricing")}</a></p>
       {!canManage ? <p className="mt-4 text-sm">{t("Ask your workspace owner or admin to configure Zernio.")}</p> : <>
-        {error && <p role="alert" className="mt-4 rounded border border-error/30 bg-white p-3 text-sm text-error">{error === "Could not load connection." ? t("Could not load connection.") : error}</p>}
+        {error && <p role="alert" className="mt-4 rounded border border-error/30 bg-white p-3 text-sm text-error">{planLimit ? <>{t("Your plan does not allow more Instagram accounts. Upgrade to connect this one.")} <a href="/settings#billing" className="font-semibold underline underline-offset-4">{t("See plans")}</a></> : error === "Could not load connection." ? t("Could not load connection.") : error}</p>}
         {!data?.configured ? <form className="mt-5 space-y-3" onSubmit={e => { e.preventDefault(); void act({ method: 'POST', body: { apiKey } }); }}>
           <label className="block text-sm font-medium" htmlFor="zernio-api-key">{t("Zernio API key")}</label>
           <input id="zernio-api-key" type="password" autoComplete="off" value={apiKey} onChange={e => setApiKey(e.target.value)} required className="w-full rounded-lg border border-zernio-border bg-white px-3 py-2 text-sm" />
